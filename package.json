@@ -1,0 +1,14 @@
+{
+  "name": "seo-agent",
+  "version": "1.0.0",
+  "description": "Autonomous SEO Optimization Agent — AI-powered multi-agent system that audits, fixes, and reports SEO issues",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx serve . -p 3000 -s",
+    "start": "npx serve . -p 3000 -s",
+    "preview": "npx live-server --port=3000 --open=/"
+  },
+  "keywords": ["seo", "audit", "ai-agent", "optimization", "meta-tags", "schema"],
+  "author": "",
+  "license": "MIT"
+}
