@@ -184,6 +184,39 @@
       <span>SEO<em>Agent</em></span>
     </div>
     <div class="dash-topbar-right">
+      <!-- Auto-Scheduler Controls -->
+      <div class="sched-controls">
+        <select id="scheduleInterval" class="sched-select">
+          <option value="60000">1 min</option>
+          <option value="300000">5 min</option>
+          <option value="900000">15 min</option>
+          <option value="1800000">30 min</option>
+          <option value="3600000" selected>1 hour</option>
+          <option value="21600000">6 hours</option>
+          <option value="86400000">24 hours</option>
+        </select>
+        <button class="btn btn-sm btn-sched" id="scheduleToggle" onclick="App.toggleScheduler()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          <span class="sched-label">Start Auto-Audit</span>
+        </button>
+        <span class="sched-status" id="schedStatusText"></span>
+      </div>
+
+      <!-- Watch Mode Controls -->
+      <div class="watch-controls">
+        <select id="watchInterval" class="watch-select">
+          <option value="15000">15s</option>
+          <option value="30000" selected>30s</option>
+          <option value="60000">1m</option>
+          <option value="300000">5m</option>
+        </select>
+        <button class="btn btn-sm btn-watch" id="watchToggle" onclick="App.toggleWatch()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span class="watch-label">Watch for Changes</span>
+        </button>
+        <span class="watch-status" id="watchStatusText"></span>
+      </div>
+
       <button class="btn btn-sm btn-secondary" onclick="App.goTo('upload')">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="M12 5v14M5 12h14"/></svg>
         New Audit
@@ -270,6 +303,92 @@
       </div>
     </div>
 
+    <!-- Content Change Notification -->
+    <div class="change-notification" id="changeNotification">
+      <div class="change-notif-header">
+        <span class="change-notif-icon">&#x1F4E1;</span>
+        <strong>Content Change Detected</strong>
+        <span class="change-time"></span>
+        <button class="btn-close-notif" onclick="document.getElementById('changeNotification').classList.remove('visible')">&times;</button>
+      </div>
+      <div class="change-list"></div>
+      <div class="change-notif-footer">Re-audit triggered automatically</div>
+    </div>
+
+    <!-- SEO Output Panel — Generated Tags -->
+    <div class="seo-output-panel" id="seoOutputPanel" style="display:none">
+      <div class="seo-output-header">
+        <h3>&#x1F3AF; Optimized SEO Tags</h3>
+        <p class="desc">Generated from content analysis — copy and paste into your HTML &lt;head&gt;</p>
+      </div>
+
+      <!-- SERP Preview -->
+      <div class="serp-preview-wrap">
+        <div class="serp-preview-label">Google Search Preview</div>
+        <div class="serp-preview" id="serpPreview"></div>
+      </div>
+
+      <!-- Generated Title -->
+      <div class="gen-field">
+        <div class="gen-field-header">
+          <label>Meta Title</label>
+          <span class="gen-len" id="genTitleLen">0 chars</span>
+          <button class="btn btn-sm btn-copy" onclick="App.copyToClipboard('genTitle', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <div class="gen-value" id="genTitle"></div>
+        <div class="len-bar"><div class="len-bar-fill" id="genTitleBar"></div></div>
+        <div class="len-guide">Ideal: 30–60 characters</div>
+      </div>
+
+      <!-- Generated Description -->
+      <div class="gen-field">
+        <div class="gen-field-header">
+          <label>Meta Description</label>
+          <span class="gen-len" id="genDescLen">0 chars</span>
+          <button class="btn btn-sm btn-copy" onclick="App.copyToClipboard('genDesc', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <div class="gen-value" id="genDesc"></div>
+        <div class="len-bar"><div class="len-bar-fill" id="genDescBar"></div></div>
+        <div class="len-guide">Ideal: 70–160 characters</div>
+      </div>
+
+      <!-- Keywords & Phrases -->
+      <div class="gen-row">
+        <div class="gen-field gen-half">
+          <div class="gen-field-header"><label>Extracted Keywords</label></div>
+          <div class="kw-list" id="genKeywords"></div>
+        </div>
+        <div class="gen-field gen-half">
+          <div class="gen-field-header"><label>Key Phrases</label></div>
+          <div class="ph-list" id="genPhrases"></div>
+        </div>
+      </div>
+
+      <!-- Full HTML Snippet -->
+      <div class="gen-field">
+        <div class="gen-field-header">
+          <label>Copy-Ready HTML Tags</label>
+          <button class="btn btn-sm btn-copy" onclick="App.copyToClipboard('genSnippet', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            Copy All
+          </button>
+        </div>
+        <pre class="gen-snippet" id="genSnippet"></pre>
+      </div>
+
+      <!-- Ranking Tips -->
+      <div class="ranking-tips-section">
+        <h4>&#x1F4C8; Ranking Optimization Tips</h4>
+        <div id="rankingTips"></div>
+      </div>
+    </div>
+
     <!-- Agent Log Terminal -->
     <div class="agent-log">
       <div class="agent-log-header">
@@ -296,6 +415,15 @@
         </button>
       </div>
     </div>
+
+    <!-- Audit History Timeline -->
+    <div class="history-panel" id="historyPanel" style="display:none">
+      <div class="history-header">
+        <h3>&#x1F4CA; Audit History</h3>
+        <p class="desc">Tracked across scheduled runs — shows score trends over time</p>
+      </div>
+      <div class="history-list" id="historyList"></div>
+    </div>
   </div>
 </div>
 
@@ -303,6 +431,8 @@
 <script src="js/particles.js"></script>
 <script src="js/engine.js"></script>
 <script src="js/demo-data.js"></script>
+<script src="js/content-monitor.js"></script>
+<script src="js/scheduler.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

@@ -102,6 +102,410 @@ const App = {
   },
 
   /* ═══════════════════════════════════════════════
+     WATCH MODE — Content Change Detection
+     ═══════════════════════════════════════════════ */
+  watchActive: false,
+  lastAuditSource: null,
+  lastAuditHtml: null,
+
+  toggleWatch() {
+    if (this.watchActive) {
+      this.stopWatch();
+    } else {
+      this.startWatch();
+    }
+  },
+
+  startWatch() {
+    if (!this.lastAuditSource || this.lastAuditSource === 'Pasted HTML' || this.lastAuditSource.startsWith('Uploaded:') || this.lastAuditSource === 'demo-ecommerce.com') {
+      this.addLog('[Monitor] Cannot watch — no live URL to monitor. Use "Enter URL" mode.', 'log-red');
+      return;
+    }
+
+    this.watchActive = true;
+    const btn = document.getElementById('watchToggle');
+    if (btn) {
+      btn.classList.add('active');
+      btn.querySelector('.watch-label').textContent = 'Stop Watching';
+    }
+
+    const intervalSelect = document.getElementById('watchInterval');
+    const intervalMs = intervalSelect ? parseInt(intervalSelect.value) : 30000;
+
+    ContentMonitor.start(this.lastAuditSource, {
+      intervalMs,
+      onChange: (data) => this.onContentChange(data),
+      onStatus: (status) => this.onWatchStatus(status)
+    });
+
+    this.addLog('[Monitor] Watch mode ACTIVE — checking every ' + (intervalMs / 1000) + 's', 'log-accent');
+    this.updateWatchStatus('Watching...');
+  },
+
+  stopWatch() {
+    this.watchActive = false;
+    ContentMonitor.stop();
+    const btn = document.getElementById('watchToggle');
+    if (btn) {
+      btn.classList.remove('active');
+      btn.querySelector('.watch-label').textContent = 'Watch for Changes';
+    }
+    this.updateWatchStatus('Stopped');
+    this.addLog('[Monitor] Watch mode STOPPED', 'log-muted');
+  },
+
+  onContentChange(data) {
+    this.addLog('', '');
+    this.addLog('[Monitor] CONTENT CHANGE DETECTED!', 'log-red', true);
+    data.diff.forEach(d => {
+      this.addLog('[Monitor]   ' + d.type + ': "' + d.old + '" → "' + d.new + '"', 'log-amber');
+    });
+    this.addLog('[Monitor] Auto-triggering re-audit...', 'log-accent');
+
+    // Show change notification
+    this.showChangeNotification(data);
+
+    // Re-run audit with new content
+    this.runAudit(data.html, data.url);
+  },
+
+  onWatchStatus(status) {
+    if (status.state === 'checking') {
+      this.updateWatchStatus('Checking (#' + status.check + ')...');
+    } else if (status.state === 'no-change') {
+      this.updateWatchStatus('No changes (check #' + status.check + ')');
+    } else if (status.state === 'error') {
+      this.updateWatchStatus('Error: ' + status.error);
+      this.addLog('[Monitor] Error: ' + status.error, 'log-red');
+    }
+  },
+
+  updateWatchStatus(text) {
+    const el = document.getElementById('watchStatusText');
+    if (el) el.textContent = text;
+  },
+
+  showChangeNotification(data) {
+    const notif = document.getElementById('changeNotification');
+    if (!notif) return;
+
+    const list = notif.querySelector('.change-list');
+    list.innerHTML = '';
+    data.diff.forEach(d => {
+      const div = document.createElement('div');
+      div.className = 'change-item';
+      div.innerHTML = `
+        <span class="change-type">${this.esc(d.type)}</span>
+        <span class="change-old">${this.esc(d.old || '(empty)')}</span>
+        <span class="change-arrow">→</span>
+        <span class="change-new">${this.esc(d.new)}</span>`;
+      list.appendChild(div);
+    });
+
+    const time = notif.querySelector('.change-time');
+    if (time) time.textContent = new Date().toLocaleTimeString();
+
+    notif.classList.add('visible');
+    setTimeout(() => notif.classList.remove('visible'), 10000);
+  },
+
+  /* ═══════════════════════════════════════════════
+     SEO OUTPUT — Copy-Ready Tags
+     ═══════════════════════════════════════════════ */
+  renderSeoOutput(seoTags) {
+    if (!seoTags) return;
+
+    // Title
+    document.getElementById('genTitle').textContent = seoTags.title;
+    document.getElementById('genTitleLen').textContent = seoTags.title.length + ' chars';
+    const titleBar = document.getElementById('genTitleBar');
+    if (titleBar) {
+      const pct = Math.min(100, (seoTags.title.length / 60) * 100);
+      titleBar.style.width = pct + '%';
+      titleBar.className = 'len-bar-fill' + (seoTags.title.length > 60 ? ' over' : seoTags.title.length >= 30 ? ' good' : ' short');
+    }
+
+    // Description
+    document.getElementById('genDesc').textContent = seoTags.description;
+    document.getElementById('genDescLen').textContent = seoTags.description.length + ' chars';
+    const descBar = document.getElementById('genDescBar');
+    if (descBar) {
+      const pct = Math.min(100, (seoTags.description.length / 160) * 100);
+      descBar.style.width = pct + '%';
+      descBar.className = 'len-bar-fill' + (seoTags.description.length > 160 ? ' over' : seoTags.description.length >= 70 ? ' good' : ' short');
+    }
+
+    // Keywords
+    const kwEl = document.getElementById('genKeywords');
+    if (kwEl) {
+      kwEl.innerHTML = seoTags.keywords.map(k => '<span class="kw-tag">' + this.esc(k) + '</span>').join('');
+    }
+
+    // Phrases
+    const phEl = document.getElementById('genPhrases');
+    if (phEl) {
+      phEl.innerHTML = seoTags.phrases.map(p => '<span class="ph-tag">' + this.esc(p) + '</span>').join('') || '<span class="no-data">No frequent phrases detected</span>';
+    }
+
+    // Full HTML snippet
+    document.getElementById('genSnippet').textContent = seoTags.htmlSnippet;
+
+    // SERP Preview
+    this.renderSerpPreview(seoTags);
+
+    // Ranking Tips
+    this.renderRankingTips(seoTags.tips);
+
+    // Show the panel
+    document.getElementById('seoOutputPanel').style.display = 'block';
+  },
+
+  renderSerpPreview(tags) {
+    const el = document.getElementById('serpPreview');
+    if (!el) return;
+    const displayUrl = this.lastAuditSource || 'example.com';
+    el.innerHTML = `
+      <div class="serp-url">${this.esc(displayUrl)}</div>
+      <div class="serp-title">${this.esc(tags.title)}</div>
+      <div class="serp-desc">${this.esc(tags.description)}</div>`;
+  },
+
+  renderRankingTips(tips) {
+    const el = document.getElementById('rankingTips');
+    if (!el) return;
+    el.innerHTML = '';
+    tips.forEach(tip => {
+      const div = document.createElement('div');
+      div.className = 'tip-item tip-' + tip.priority;
+      div.innerHTML = `
+        <div class="tip-priority">${tip.priority.toUpperCase()}</div>
+        <div class="tip-body">
+          <div class="tip-text">${this.esc(tip.tip)}</div>
+          <div class="tip-action">${this.esc(tip.action)}</div>
+        </div>`;
+      el.appendChild(div);
+    });
+  },
+
+  copyToClipboard(elementId, btn) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const text = el.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const original = btn.innerHTML;
+      btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="14" height="14"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.innerHTML = original; btn.classList.remove('copied'); }, 2000);
+    });
+  },
+
+  /* ═══════════════════════════════════════════════
+     AUTO-SCHEDULER — Recurring Full-Site Audits
+     ═══════════════════════════════════════════════ */
+  schedulerActive: false,
+
+  toggleScheduler() {
+    if (this.schedulerActive) {
+      this.stopScheduler();
+    } else {
+      this.startScheduler();
+    }
+  },
+
+  startScheduler() {
+    const url = this.lastAuditSource;
+    if (!url || url === 'Pasted HTML' || url.startsWith('Uploaded:') || url === 'demo-ecommerce.com') {
+      this.addLog('[Scheduler] Cannot schedule — need a live URL. Use "Enter URL" mode first.', 'log-red');
+      return;
+    }
+
+    const intervalSelect = document.getElementById('scheduleInterval');
+    const intervalMs = intervalSelect ? parseInt(intervalSelect.value) : 3600000;
+
+    this.schedulerActive = true;
+    const btn = document.getElementById('scheduleToggle');
+    if (btn) {
+      btn.classList.add('active');
+      btn.querySelector('.sched-label').textContent = 'Stop Auto-Audit';
+    }
+
+    Scheduler.start(url, {
+      intervalMs,
+      onRun: (entry) => this.onSchedulerRun(entry),
+      onStatus: (status) => this.onSchedulerStatus(status)
+    });
+  },
+
+  stopScheduler() {
+    this.schedulerActive = false;
+    Scheduler.stop();
+    const btn = document.getElementById('scheduleToggle');
+    if (btn) {
+      btn.classList.remove('active');
+      btn.querySelector('.sched-label').textContent = 'Start Auto-Audit';
+    }
+    this.updateSchedulerStatus('Stopped');
+    this.addLog('[Scheduler] Auto-audit STOPPED', 'log-muted');
+  },
+
+  onSchedulerRun(entry) {
+    // Update dashboard with latest multi-page results
+    this.addLog('', '');
+    this.addLog('[Scheduler] === RUN #' + entry.id + ' COMPLETE ===', 'log-green', true);
+    this.addLog('[Scheduler] Pages audited: ' + entry.pagesAudited, 'log-accent');
+    this.addLog('[Scheduler] Avg score: ' + entry.avgScore + '/100', 'log-accent');
+    this.addLog('[Scheduler] Issues: ' + entry.totalIssues + ' (' + entry.autoFixed + ' fixed, ' + entry.escalated + ' escalated)', 'log-amber');
+    this.addLog('[Scheduler] Duration: ' + entry.elapsed, 'log-muted');
+
+    // Refresh dashboard with multi-page data
+    const primary = entry.pages[0];
+    this.auditData = {
+      pages: entry.pages,
+      source: entry.url,
+      summary: {
+        totalIssues: entry.totalIssues,
+        autoFixed: entry.autoFixed,
+        escalated: entry.escalated,
+        score: entry.avgScore
+      }
+    };
+    this.lastAuditSource = entry.url;
+    this.renderDashboard();
+
+    // Render multi-page sidebar
+    this.renderMultiPageSidebar(entry.pages);
+
+    // Render audit history timeline
+    this.renderHistory();
+  },
+
+  onSchedulerStatus(status) {
+    if (status.state === 'started') {
+      this.addLog('[Scheduler] Auto-audit STARTED for ' + status.url, 'log-accent', true);
+      this.addLog('[Scheduler] Interval: every ' + this.formatInterval(status.interval), 'log-accent');
+      this.updateSchedulerStatus('Running...');
+    } else if (status.state === 'running') {
+      this.addLog('[Scheduler] Run #' + status.run + ' starting...', 'log-accent');
+      this.updateSchedulerStatus('Auditing (run #' + status.run + ')...');
+    } else if (status.state === 'progress') {
+      this.addLog('[Scheduler] ' + status.phase, 'log-muted');
+      this.updateSchedulerStatus(status.phase);
+    } else if (status.state === 'scheduled') {
+      this.updateSchedulerStatus('Next run: ' + status.nextRun);
+      this.addLog('[Scheduler] Next run at ' + status.nextRun, 'log-muted');
+    } else if (status.state === 'error') {
+      this.addLog('[Scheduler] Error on run #' + status.run + ': ' + status.error, 'log-red');
+      this.updateSchedulerStatus('Error — retrying at next interval');
+    }
+  },
+
+  updateSchedulerStatus(text) {
+    const el = document.getElementById('schedStatusText');
+    if (el) el.textContent = text;
+  },
+
+  formatInterval(ms) {
+    if (ms >= 3600000) return (ms / 3600000) + 'hr';
+    if (ms >= 60000) return (ms / 60000) + 'min';
+    return (ms / 1000) + 's';
+  },
+
+  /** Render multi-page sidebar (overwrites single-page list) */
+  renderMultiPageSidebar(pages) {
+    const pl = document.getElementById('pageList');
+    pl.innerHTML = '';
+    pages.forEach((p, i) => {
+      const cls = p.score >= 70 ? 'good' : p.score >= 40 ? 'ok' : 'bad';
+      const li = document.createElement('li');
+      li.className = 'page-item' + (i === 0 ? ' active' : '');
+      li.onclick = () => this.selectPage(i);
+      li.innerHTML = `
+        <div class="page-item-score ${cls}">${p.score}</div>
+        <div class="page-item-info">
+          <div class="page-item-name">${this.esc(p.url)}</div>
+          <div class="page-item-issues">${p.issues.length} issues</div>
+        </div>`;
+      pl.appendChild(li);
+    });
+  },
+
+  /** Switch to viewing a specific page's results */
+  selectPage(idx) {
+    if (!this.auditData || !this.auditData.pages[idx]) return;
+    const pg = this.auditData.pages[idx];
+
+    // Update sidebar active state
+    document.querySelectorAll('.page-item').forEach((li, i) => {
+      li.classList.toggle('active', i === idx);
+    });
+
+    // Update score
+    const score = pg.score;
+    const circ = 138.23;
+    const offset = circ - (circ * score / 100);
+    const scoreCircle = document.getElementById('scoreCircle');
+    scoreCircle.style.stroke = score >= 70 ? '#22c55e' : score >= 40 ? '#f59e0b' : '#ef4444';
+    scoreCircle.style.strokeDashoffset = offset;
+    document.getElementById('scoreVal').textContent = score;
+    document.getElementById('scoreText').textContent =
+      score >= 70 ? 'Good' : score >= 40 ? 'Needs Work' : 'Poor';
+
+    // Update issues table
+    this.renderIssues(pg.issues);
+
+    // Update SEO output
+    if (pg.seoTags) this.renderSeoOutput(pg.seoTags);
+  },
+
+  /** Render audit history timeline */
+  renderHistory() {
+    const panel = document.getElementById('historyPanel');
+    const list = document.getElementById('historyList');
+    if (!panel || !list) return;
+
+    if (Scheduler.history.length === 0) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    panel.style.display = 'block';
+    list.innerHTML = '';
+
+    Scheduler.history.slice(0, 10).forEach(entry => {
+      const scoreClass = entry.avgScore >= 70 ? 'good' : entry.avgScore >= 40 ? 'ok' : 'bad';
+      const trend = Scheduler.history.length > 1 && entry.id > 1
+        ? this.getScoreTrend(entry.id)
+        : '';
+
+      const div = document.createElement('div');
+      div.className = 'history-item';
+      div.innerHTML = `
+        <div class="history-run">#${entry.id}</div>
+        <div class="history-time">${this.esc(entry.timeStr)}</div>
+        <div class="history-score ${scoreClass}">${entry.avgScore}</div>
+        <div class="history-trend">${trend}</div>
+        <div class="history-detail">
+          <span>${entry.pagesAudited} pages</span>
+          <span>${entry.totalIssues} issues</span>
+          <span>${entry.autoFixed} fixed</span>
+          <span>${entry.elapsed}</span>
+        </div>`;
+      list.appendChild(div);
+    });
+  },
+
+  /** Get score trend arrow */
+  getScoreTrend(runId) {
+    const current = Scheduler.history.find(h => h.id === runId);
+    const prev = Scheduler.history.find(h => h.id === runId - 1);
+    if (!current || !prev) return '';
+    const diff = current.avgScore - prev.avgScore;
+    if (diff > 0) return '<span class="trend-up">+' + diff + '</span>';
+    if (diff < 0) return '<span class="trend-down">' + diff + '</span>';
+    return '<span class="trend-same">—</span>';
+  },
+
+  /* ═══════════════════════════════════════════════
      MAIN AUDIT ORCHESTRATOR
      Runs the 5-phase agent pipeline with visual feedback
      ═══════════════════════════════════════════════ */
@@ -178,6 +582,8 @@ const App = {
         score: auditResults[0].score
       }
     };
+    this.lastAuditSource = source;
+    this.lastAuditHtml = html;
     this.renderDashboard();
   },
 
@@ -190,6 +596,8 @@ const App = {
     document.getElementById('pageList').innerHTML = '';
     document.getElementById('escalationList').innerHTML = '';
     document.getElementById('escalationPanel').style.display = 'none';
+    document.getElementById('seoOutputPanel').style.display = 'none';
+    document.getElementById('changeNotification').classList.remove('visible');
     ['cardPages', 'cardIssues', 'cardFixed', 'cardEscalated'].forEach(id =>
       document.getElementById(id).textContent = '0'
     );
@@ -251,6 +659,11 @@ const App = {
 
     // Issues table
     this.renderIssues(pg.issues);
+
+    // SEO Output Panel (generated tags)
+    if (pg.seoTags) {
+      this.renderSeoOutput(pg.seoTags);
+    }
 
     // Escalation panel
     const escalated = pg.issues.filter(i => i.action === 'escalate');
@@ -402,6 +815,21 @@ const App = {
       txt += '   Action:    ' + issue.action + '\n';
       txt += '   Reason:    ' + issue.reason + '\n\n';
     });
+
+    // Include generated SEO tags
+    if (pg.seoTags) {
+      txt += '--- OPTIMIZED SEO TAGS ---\n\n';
+      txt += 'Generated Title: ' + pg.seoTags.title + '\n';
+      txt += 'Generated Description: ' + pg.seoTags.description + '\n';
+      txt += 'Keywords: ' + pg.seoTags.keywords.join(', ') + '\n\n';
+      txt += '--- COPY-READY HTML ---\n\n';
+      txt += pg.seoTags.htmlSnippet + '\n\n';
+      txt += '--- RANKING TIPS ---\n\n';
+      pg.seoTags.tips.forEach((tip, i) => {
+        txt += (i + 1) + '. [' + tip.priority.toUpperCase() + '] ' + tip.tip + '\n';
+        txt += '   Action: ' + tip.action + '\n\n';
+      });
+    }
 
     txt += '\n--- Generated by SEO Agent ---\n';
 

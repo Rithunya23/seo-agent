@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   SEO Analysis Engine — 11 Rule Checks
+   SEO Analysis Engine — 11 Rule Checks + Smart Generation
    ═══════════════════════════════════════════════ */
 const SEOEngine = {
 
@@ -10,7 +10,294 @@ const SEOEngine = {
     const meta = this.extractMeta(doc, url);
     const issues = this.runChecks(meta, url);
     const score = this.calcScore(issues);
-    return { url, issues, score, meta };
+    const seoTags = this.generateOptimizedTags(meta, url);
+    return { url, issues, score, meta, seoTags };
+  },
+
+  /* ═══════════════════════════════════════════════
+     SMART SEO TAG GENERATION
+     Extracts keywords, analyzes content, and generates
+     ranking-optimized meta title, description, and tags
+     ═══════════════════════════════════════════════ */
+
+  /** Extract top keywords from page content */
+  extractKeywords(text, count = 8) {
+    const stop = new Set([
+      'the','a','an','and','or','but','in','on','at','to','for','of','with',
+      'by','from','as','is','was','are','were','been','be','have','has','had',
+      'do','does','did','will','would','could','should','may','might','shall',
+      'can','this','that','these','those','it','its','i','you','he','she','we',
+      'they','me','him','her','us','them','my','your','his','our','their',
+      'what','which','who','whom','where','when','how','not','no','nor','if',
+      'then','than','too','very','just','about','above','after','again','all',
+      'also','am','any','because','before','between','both','each','few','get',
+      'here','into','more','most','other','out','over','own','same','so','some',
+      'such','up','only','now','new','one','two','like','make','many','well',
+      'back','even','give','good','know','look','see','take','come','could',
+      'find','first','go','great','here','high','last','long','look','made',
+      'much','need','never','next','old','part','place','point','right','show',
+      'still','tell','thing','think','three','through','under','us','use','way',
+      'work','world','year','click','read','learn','best','top','buy','free',
+      'www','http','https','html','com','org','net'
+    ]);
+
+    const words = text.toLowerCase()
+      .replace(/[^a-z0-9\s'-]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length > 2 && !stop.has(w));
+
+    const freq = {};
+    words.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+
+    // Score: frequency * word length bonus
+    return Object.entries(freq)
+      .map(([word, cnt]) => ({ word, score: cnt * (1 + word.length * 0.1) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, count)
+      .map(e => e.word);
+  },
+
+  /** Extract key phrases (2-3 word combos) */
+  extractPhrases(text, count = 5) {
+    const clean = text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ');
+    const words = clean.split(/\s+/).filter(w => w.length > 2);
+    const bigrams = {};
+    for (let i = 0; i < words.length - 1; i++) {
+      const pair = words[i] + ' ' + words[i + 1];
+      if (pair.length > 7) bigrams[pair] = (bigrams[pair] || 0) + 1;
+    }
+    return Object.entries(bigrams)
+      .filter(([, cnt]) => cnt > 1)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, count)
+      .map(e => e[0]);
+  },
+
+  /** Generate optimized meta title from content analysis */
+  generateTitle(meta, url) {
+    const domain = this.domain(url);
+    // If existing title is good, return it
+    if (meta.title && meta.title.length >= 30 && meta.title.length <= 60) {
+      return meta.title;
+    }
+
+    const h1 = meta.h1s[0] || '';
+    const keywords = this.extractKeywords(meta.bodyText, 5);
+    const phrases = this.extractPhrases(meta.bodyText, 3);
+
+    // Strategy 1: Use H1 + domain
+    if (h1 && h1.length >= 15 && h1.length <= 50) {
+      return h1 + ' | ' + this.capitalize(domain.replace(/\.[a-z]+$/, ''));
+    }
+
+    // Strategy 2: Use top phrase + keywords
+    if (phrases.length > 0) {
+      const phrase = this.titleCase(phrases[0]);
+      const kw = keywords.length > 1 ? ' — ' + this.titleCase(keywords[0]) + ' & ' + this.titleCase(keywords[1]) : '';
+      const title = phrase + kw;
+      if (title.length <= 58) return title + ' | ' + this.capitalize(domain.replace(/\.[a-z]+$/, ''));
+      return title.slice(0, 57) + '...';
+    }
+
+    // Strategy 3: Use top keywords
+    if (keywords.length >= 3) {
+      return this.titleCase(keywords.slice(0, 3).join(' ')) + ' — ' + this.capitalize(domain.replace(/\.[a-z]+$/, ''));
+    }
+
+    // Fallback
+    return this.capitalize(domain.replace(/\.[a-z]+$/, '')) + ' — Your Trusted Source';
+  },
+
+  /** Generate optimized meta description from content */
+  generateDescription(meta, url) {
+    // If existing description is good, return it
+    if (meta.description && meta.description.length >= 70 && meta.description.length <= 160) {
+      return meta.description;
+    }
+
+    const keywords = this.extractKeywords(meta.bodyText, 6);
+    const phrases = this.extractPhrases(meta.bodyText, 3);
+    const sentences = meta.bodyText
+      .replace(/\s+/g, ' ')
+      .split(/[.!?]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 20 && s.length < 120);
+
+    // Find the most keyword-rich sentence
+    let bestSentence = '';
+    let bestScore = 0;
+    for (const sent of sentences) {
+      const lower = sent.toLowerCase();
+      let score = 0;
+      keywords.forEach(kw => { if (lower.includes(kw)) score++; });
+      if (score > bestScore) { bestScore = score; bestSentence = sent; }
+    }
+
+    let desc = '';
+
+    if (bestSentence) {
+      desc = bestSentence;
+      // Append keyword-rich suffix if room
+      if (desc.length < 110 && keywords.length > 2) {
+        desc += '. Discover ' + keywords.slice(0, 3).join(', ') + ' and more.';
+      }
+    } else if (phrases.length > 0) {
+      desc = 'Explore ' + phrases.slice(0, 2).join(', ') + '. ';
+      if (keywords.length > 2) {
+        desc += 'Learn about ' + keywords.slice(0, 4).join(', ') + '.';
+      }
+    } else {
+      desc = 'Discover everything about ' + this.domain(url) + '.';
+      if (keywords.length > 0) {
+        desc += ' Learn about ' + keywords.join(', ') + '.';
+      }
+    }
+
+    // Ensure length is 70-160
+    if (desc.length > 160) desc = desc.slice(0, 157) + '...';
+    if (desc.length < 70) desc += ' Visit us today for comprehensive information and resources.';
+
+    return desc;
+  },
+
+  /** Generate full set of optimized SEO tags */
+  generateOptimizedTags(meta, url) {
+    const title = this.generateTitle(meta, url);
+    const description = this.generateDescription(meta, url);
+    const domain = this.domain(url);
+    const keywords = this.extractKeywords(meta.bodyText, 10);
+    const phrases = this.extractPhrases(meta.bodyText, 5);
+
+    // Generate canonical
+    const canonical = meta.canonical || url;
+
+    // Generate OG tags
+    const ogTitle = meta.ogTitle || title;
+    const ogDesc = meta.ogDesc || description;
+    const ogImage = meta.ogImage || '';
+
+    // Generate schema
+    const schema = meta.schema.length > 0
+      ? JSON.stringify(meta.schema[0], null, 2)
+      : JSON.stringify({
+          "@context": "https://schema.org",
+          "@type": "WebPage",
+          "name": title,
+          "description": description,
+          "url": canonical
+        }, null, 2);
+
+    // Build copy-ready HTML snippet
+    const htmlSnippet = [
+      `<title>${title}</title>`,
+      `<meta name="description" content="${description}" />`,
+      `<meta name="keywords" content="${keywords.join(', ')}" />`,
+      `<link rel="canonical" href="${canonical}" />`,
+      ``,
+      `<!-- Open Graph -->`,
+      `<meta property="og:type" content="website" />`,
+      `<meta property="og:title" content="${ogTitle}" />`,
+      `<meta property="og:description" content="${ogDesc}" />`,
+      `<meta property="og:url" content="${canonical}" />`,
+      ogImage ? `<meta property="og:image" content="${ogImage}" />` : `<!-- Add og:image for social sharing -->`,
+      ``,
+      `<!-- Twitter Card -->`,
+      `<meta name="twitter:card" content="summary_large_image" />`,
+      `<meta name="twitter:title" content="${ogTitle}" />`,
+      `<meta name="twitter:description" content="${ogDesc}" />`,
+      ``,
+      `<!-- Structured Data -->`,
+      `<script type="application/ld+json">`,
+      schema,
+      `</script>`
+    ].join('\n');
+
+    return {
+      title,
+      description,
+      keywords,
+      phrases,
+      canonical,
+      ogTitle,
+      ogDesc,
+      ogImage,
+      schema,
+      htmlSnippet,
+      // Ranking tips based on analysis
+      tips: this.generateRankingTips(meta, keywords)
+    };
+  },
+
+  /** Generate actionable ranking tips */
+  generateRankingTips(meta, keywords) {
+    const tips = [];
+
+    if (meta.wordCount < 300) {
+      tips.push({
+        priority: 'high',
+        tip: 'Content is thin (' + meta.wordCount + ' words). Aim for 800-1500 words for better rankings.',
+        action: 'Add comprehensive content covering: ' + keywords.slice(0, 4).join(', ')
+      });
+    } else if (meta.wordCount < 800) {
+      tips.push({
+        priority: 'medium',
+        tip: 'Content length is OK (' + meta.wordCount + ' words) but could be stronger.',
+        action: 'Consider expanding to 1000+ words for competitive keywords.'
+      });
+    }
+
+    if (meta.h1s.length === 0) {
+      tips.push({
+        priority: 'high',
+        tip: 'Missing H1 tag — this is the most important on-page heading for SEO.',
+        action: 'Add an H1 that includes your primary keyword: "' + (keywords[0] || 'your main topic') + '"'
+      });
+    }
+
+    if (meta.h2s.length === 0 && meta.wordCount > 200) {
+      tips.push({
+        priority: 'medium',
+        tip: 'No H2 subheadings found. Structure content with H2s for better readability and SEO.',
+        action: 'Add H2 sections for: ' + keywords.slice(0, 3).map(k => '"' + k + '"').join(', ')
+      });
+    }
+
+    if (meta.internalLinks.length < 3) {
+      tips.push({
+        priority: 'medium',
+        tip: 'Only ' + meta.internalLinks.length + ' internal link(s). Internal linking boosts rankings.',
+        action: 'Add 3-5 internal links to related pages on your site.'
+      });
+    }
+
+    const imgNoAlt = meta.images.filter(i => !i.alt).length;
+    if (imgNoAlt > 0) {
+      tips.push({
+        priority: 'medium',
+        tip: imgNoAlt + ' image(s) missing alt text. Alt text helps image SEO.',
+        action: 'Add keyword-rich alt text to all images (include "' + (keywords[0] || 'topic') + '" where relevant).'
+      });
+    }
+
+    if (keywords.length > 0) {
+      tips.push({
+        priority: 'info',
+        tip: 'Top keywords detected: ' + keywords.slice(0, 5).join(', '),
+        action: 'Ensure these appear in your title, H1, first paragraph, and meta description.'
+      });
+    }
+
+    return tips;
+  },
+
+  /** Title case helper */
+  titleCase(str) {
+    return str.replace(/\b\w/g, c => c.toUpperCase());
+  },
+
+  /** Capitalize first letter */
+  capitalize(s) {
+    return s.charAt(0).toUpperCase() + s.slice(1);
   },
 
   /** Extract all SEO-relevant metadata from parsed HTML */
